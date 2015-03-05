@@ -41,71 +41,53 @@
 
 <script type="text/javascript">
   $(function() {
+    if (!isCanvasSupported()) {
+      $("#map_canvas").html('<b>Your browser is too old to display this map.<br />' +
+                            'Please update to a current version.</b>');
+      return;
+    }
+
     slUnits.init({{ h.json.dumps(h.get_setting_name('distance_unit')) }},
                  {{ h.json.dumps(h.get_setting_name('speed_unit')) }},
                  {{ h.json.dumps(h.get_setting_name('lift_unit')) }},
                  {{ h.json.dumps(h.get_setting_name('altitude_unit')) }});
 
-    initOpenLayers("map_canvas",
-                   "{{ config.get('SKYLINES_MAP_TILE_URL') }}",
-                   { {% if 'baselayer' in request.args %}'base_layer': '{{ request.args['baselayer'] }}',{% endif %}{% if 'overlays' in request.args %}'overlay_layers': '{{ request.args['overlays'] }}',{% endif %} });
-    initFlightLayer();
-    initBaro($("#barogram"));
+    var sl_map =
+      new slMap("map_canvas",
+                "{{ config.get('SKYLINES_MAP_TILE_URL') }}",
+                { {% if 'baselayer' in request.args %}'base_layer': '{{ request.args['baselayer'] }}',{% endif %}{% if 'overlays' in request.args %}'overlay_layers': '{{ request.args['overlays'] }}',{% endif %} });
 
-    addFlight({{ flight.id }},
-      {{ h.json.dumps(trace.encoded.points) }},
-      {{ h.json.dumps(trace.encoded.levels) }},
-      {{ trace.num_levels }},
-      {{ h.json.dumps(trace.barogram_t) }},
-      {{ h.json.dumps(trace.barogram_h) }},
-      {{ h.json.dumps(trace.enl) }},
-      {{ h.json.dumps(trace.zoom_levels) }},
-      {{ h.json.dumps(trace.contests) }},
-      {{ h.json.dumps(trace.elevations_t) }},
-      {{ h.json.dumps(trace.elevations_h) }},
-      { registration: {{ '"' ~ flight.registration|e ~ '"' if flight.registration else 'null' }},
-        competition_id: {{ '"' ~ flight.competition_id|e ~ '"' if flight.competition_id else 'null' }} }
-    );
+    var map = sl_map.getMap();
+
+    var flight_display = slFlightDisplay(sl_map.getMap(), $("#fix-data"), $("#barogram"));
+    flight_display.addFlightFromJSON("/flights/{{ flight.id }}/json?{{ config.get('SKYLINES_CACHE_BUSTER', '') }}",false);
 
     {% if other_flights -%}
     {% for flight, trace in other_flights if trace -%}
-    addFlight({{ flight.id }},
-      {{ h.json.dumps(trace.encoded.points) }},
-      {{ h.json.dumps(trace.encoded.levels) }},
-      {{ trace.num_levels }},
-      {{ h.json.dumps(trace.barogram_t) }},
-      {{ h.json.dumps(trace.barogram_h) }},
-      {{ h.json.dumps(trace.enl) }},
-      {{ h.json.dumps(trace.zoom_levels) }},
-      {{ h.json.dumps(trace.contests) }},
-      {{ h.json.dumps(trace.elevations_t) }},
-      {{ h.json.dumps(trace.elevations_h) }},
-      { registration: {{ '"' ~ flight.registration|e ~ '"' if flight.registration else 'null' }},
-        competition_id: {{ '"' ~ flight.competition_id|e ~ '"' if flight.competition_id else 'null' }} }
-    );
+    flight_display.addFlightFromJSON("/flights/{{ flight.id }}/json?{{ config.get('SKYLINES_CACHE_BUSTER', '') }}");
     {%- endfor %}
     {%- endif %}
 
-    var factor = $("#barogram")[0].offsetHeight / map.getSize().h;
-    var zoomExtent = flights.getBounds().clone().scale(1.02);
-    zoomExtent.bottom -= zoomExtent.getHeight() * factor * 3/2;
+    var factor = $("#barogram")[0].offsetHeight / map.getSize()[1];
 
-    map.zoomToExtent(zoomExtent);
-
-    hoverMap();
+    var view = map.getView();
+    var extent = flight_display.getFlights().getBounds();
+    var buffer = Math.max(ol.extent.getWidth(extent), ol.extent.getHeight(extent));
+    extent = ol.extent.buffer(extent, buffer * 0.02);
+    extent[1] -= ol.extent.getHeight(extent) * factor * 3/2;
+    view.fitExtent(extent, map.getSize());
 
     var pinnedFlights = getPinnedFlights();
     for (i in pinnedFlights)
       if (pinnedFlights[i] != {{ flight.id }})
-        addFlightFromJSON("/flights/" + pinnedFlights[i] + "/json");
+        flight_display.addFlightFromJSON("/flights/" + pinnedFlights[i] + "/json");
 
     pinButton($("#pinned"), {{ flight.id }});
+    sl_map.addBingLayers("{{ config.get('SKYLINES_BING_API_KEY', 'null') }}");
+    sl_map.addMapboxLayer("{{ config.get('SKYLINES_MAPBOX_API_KEY', 'null') }}");
 
-    $.getScript("https://maps.google.com/maps/api/js?v=3.7&sensor=false&callback=addGoogleLayer");
-    addBingLayers("{{ config.get('SKYLINES_BING_API_KEY', 'null') }}");
-    addReliefLayer();
-
-    initInfoBox({flight_info: true, location_info: true});
+    var map_click_handler = slMapClickHandler(map, flight_display,
+                                              {flight_info: true, location_info: true});
   });
 </script>
 {%- endblock %}
